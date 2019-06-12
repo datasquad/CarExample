@@ -1,0 +1,134 @@
+---
+title: "CarData"
+author: "Ralf Becker"
+date: "24 May 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Import required libraries
+
+Make sure that the following packages are installed before you load them with the library command. 
+
+```{r, eval = FALSE}
+#install.packages(c("tidyverse","readxl","ggplot"))
+```
+
+The installation only needs to be done once on every computer you use. 
+
+Then we load these packages using the `library` command.
+
+```{r}
+#library(tidyverse)  # the swiss army knife for data tidying
+library(ggplot2)
+library(tidyr)
+library(readxl)     # to import excel file 
+library(zoo)        # to deal with time
+```
+## Import the data and data prep
+
+We use vehicle licencing statistics published by the DVLA. On its [https://www.gov.uk/government/statistical-data-sets/all-vehicles-veh01#licensed-vehicles](Vehicle licencing statistics webpage) you can see a range of spreadsheets with various pieces of information. Here we are using the "VEH0120: Licensed vehicles by make and model: Great Britain and United Kingdom" spreadsheet which has been saved under the name "DVLA_veh0120.xlsx". 
+
+Have a look at the spreadsheet and you will see that the first 6 rows contains some information and that the data table really starts with row 7. So when we import the sheet we drop the first six rows `skip = 6`.
+
+```{r}
+car_stock <- read_xlsx("DVLA_veh0120.xlsx", sheet = "Cars", skip = 6)
+head(car_stock,15)  # shows first 15 rows
+tail(car_stock,15)  # shows last 15 rows
+```
+
+From the output for the `tail(car_stock,15) ` command you can see that the last 10 columns do not belong to the datatable anymore. Hence we will remove the last 10 rows
+
+```{r}
+car_stock <- car_stock[1:(nrow(car_stock)-10),]
+```
+
+As you can see we have information on the car make and the model (yes Abarth is a car company - google it!) and across the columns we then have information on how many models were registered in a particular quarter. So we have a time-series of information in one row. Later we will have to convert a time-series into columns and that will facilitate us working with them. But first let's look at the names for all our variables/columns.
+
+```{r}
+names(car_stock)
+```
+
+You can see that the earliest information is from 1994 Q4 and the most up to date from 2018 Q4. But for the quarters2014 Q3 onwards we actually have two pieces of information. Once for Great Britain (GB) and once for the United Kingdom (UK, which is GB + Northern Ireland). If you read the information in the spreadsheet above the table you will realise that the early data are GB data. In order to concentrate on a consistent time series we will remove the UK data.
+
+In order to remove a subset of columns we will use a the following command. In words this does the following ("redefine `car_stock`" - `car_stock <-`) by taking the original `car_stock` and sending it (`%>%`) to the select function  (`select`) function. We then instruct the select function to remove (`-`) every column which `contains` `"UK"`.
+
+```{r}
+car_stock <- car_stock %>% select(-contains("UK"))
+names(car_stock)
+```
+
+So that has worked. We now remove the "GB" term from the time variable names. To achieve this we use a a very useful function which redefines our datasets names vector (`names(car_stock`), by finding the text `" GB"` and replacing it with nothing `""`. Use the internet to find what the name of the function is. It starts with "g". You could use search terms like "R replace text".
+
+```{r, eval = FALSE}
+names(car_stock) <- gXXXX(" GB", "", names(car_stock))
+```
+```{r, echo = FALSE}
+names(car_stock) <- gsub(" GB", "", names(car_stock))
+```
+
+And while we are at changing names we shall also remove all spaces from variable names and replace them with a ".".
+
+```{r, eval = FALSE}
+names(car_stock) <- gXXXX(" ", ".", names(car_stock))
+```
+```{r, echo = FALSE}
+names(car_stock) <- gsub(" ", ".", names(car_stock))
+```
+
+
+
+## Convert wide to long dataset
+
+We want to change the structure of the dataset such that we can use the time-series nature of the dataset
+
+```{r}
+car_stock_l <- car_stock %>% gather(time,stock,'2018.Q4':'1994.Q4') %>% 
+                arrange(Make,Model.1,time)    # sort the rows
+head(car_stock_l)
+```
+
+Next we want to ensure that the `time` variable is recognised as a time variable. At this stage it is merely a `chr` variable and we want to inticate that these are quarterly data 
+
+```{r}
+car_stock_l <- car_stock_l %>% mutate(time = as.yearqtr(time, "%Y.Q%q"))
+head(car_stock_l)
+```
+
+## Initial graphical analysis
+
+Let's create a subset with only Ferrari 458 data. Note that the `filter(grepl("458",Model.1))` selects those models (`Model.1`) which contain "458" in the name.
+
+```{r}
+ferrari <- car_stock_l %>% filter(Make == "FERRARI") %>% 
+                            filter(grepl("458",Model.1))
+
+ggplot(ferrari, aes(x =time, y=stock, color=Model.1)) + 
+  geom_line() +
+  ggtitle("Ferrari 438, numbers registered")
+```
+
+As we have seen before, we have a lot of different models, in particular `r nrow(unique(car_stock))`. So let's calculate registration numbers by Make.
+
+
+```{r}
+make_data <- car_stock_l %>%  
+                  group_by(Make, time) %>% 
+                  summarise(stock_make = sum(stock, na.rm = TRUE))
+```
+
+Here we still have `r nrow(make_data$Make)` different brands. Certainly too many for a graphical analysis. So let's only pick a few high profile brands.
+
+```{r}
+english_cars <- c("JAGUAR", "LAND ROVER", "MINI", "ASTON MARTIN", "BENTLEY", "ROLLS ROYCE")
+make_eng_data <- make_data %>%  
+                  filter(Make %in% english_cars)
+
+ggplot(make_eng_data, aes(x =time, y=stock_make, color=Make)) + 
+  geom_line() +
+  ggtitle("English Car Brands, numbers registered")
+
+```
